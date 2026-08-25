@@ -38,29 +38,36 @@ module PortfolioPerformanceApi
           exclude: options[:exclude]
         )
 
-        if result.candidates.empty? && result.excluded.empty? && result.existing.empty?
+        skipped = Array(result.skipped)
+        if result.candidates.empty? && result.excluded.empty? && result.existing.empty? && skipped.empty?
           warn "no Fineco transactions found in #{options[:xls]}"
           return
         end
 
         print_summary(account, loaded.client, options, result, backup)
-        if preview(account.name, result, exclude: options[:exclude]) != "Y"
-          puts "#{account.name}: skipped"
-          return
+        if result.candidates.any? || result.excluded.any? || result.existing.any?
+          if preview(account.name, result, exclude: options[:exclude]) != "Y"
+            puts "#{account.name}: skipped"
+            return
+          end
         end
 
         repaired = FinecoImport.repair_cross_entries!(loaded.client)
-        imported = result.candidates.empty? ? 0 : FinecoImport.append!(loaded.client, account, result.candidates)
-        if imported.zero? && repaired.zero?
-          warn "nothing to import"
-          return
+        imported = if result.candidates.empty?
+          0
+        else
+          FinecoImport.append!(loaded.client, account, result.candidates, skipped: skipped)
         end
-
-        @session.persist(loaded, drive)
-        uploaded = true
-        puts "Imported #{imported} transactions into #{loaded.path}" if imported.positive?
-        puts "Repaired #{repaired} cross-entry UUIDs" if repaired.positive?
-        puts "Uploaded portfolio #{File.basename(loaded.path)}"
+        if imported.positive? || repaired.positive?
+          @session.persist(loaded, drive)
+          uploaded = true
+          puts "Imported #{imported} transactions into #{loaded.path}" if imported.positive?
+          puts "Repaired #{repaired} cross-entry UUIDs" if repaired.positive?
+          puts "Uploaded portfolio #{File.basename(loaded.path)}"
+        elsif skipped.empty?
+          warn "nothing to import"
+        end
+        review_discarded(account.name, skipped)
       rescue Error, ArgumentError, RegexpError => error
         abort error.message
       ensure
@@ -111,21 +118,23 @@ module PortfolioPerformanceApi
         Session.discard_backup(path)
       end
 
-      def self.format_row(row, width: TTY::Screen.width)
+      def self.format_row(row, width: TTY::Screen.width, reason: nil)
         amount = format("%.2f", (row.amount_cents / 100.0).round(2))
         sign = row.type.to_s == "REMOVAL" ? "-" : "+"
         prefix = "#{sign}  #{row.date}  #{FinecoImport.preview_type(row).ljust(16)}  #{amount.rjust(8)}  "
+        reason_part = reason.to_s.empty? ? "" : "  #{reason}"
+        available = [Integer(width) - 2 - prefix.size - reason_part.size, 0].max
         security = row.security.to_s.empty? ? "" : "S #{row.security}  "
         dest = row.offset_account.to_s.empty? ? "" : " → #{row.offset_account}"
-        available = [Integer(width) - 2 - prefix.size, 0].max
-        if dest.size >= available
-          "#{prefix}#{truncate_note(dest, available)}"
+        middle = if dest.size >= available
+          truncate_note(dest, available)
         elsif security.size + dest.size >= available
-          "#{prefix}#{truncate_note(security, available - dest.size)}#{dest}"
+          "#{truncate_note(security, available - dest.size)}#{dest}"
         else
           note = truncate_note(row.description.to_s, available - security.size - dest.size)
-          "#{prefix}#{security}#{note}#{dest}"
+          "#{security}#{note}#{dest}"
         end
+        "#{prefix}#{middle}#{reason_part}"
       end
 
       def self.preview_sections(import_rows, excluded_rows, existing_rows = [], exclude: nil, width: TTY::Screen.width)
@@ -153,6 +162,17 @@ module PortfolioPerformanceApi
           page_size: PREVIEW_ROWS
         )
         sections
+      end
+
+      def self.discarded_sections(skipped, width: TTY::Screen.width)
+        lines = Array(skipped).map { |item| format_row(item.row, width: width, reason: item.reason) }
+        [
+          RowPreview::Section.new(
+            title: "DISCARDED",
+            lines: lines,
+            page_size: PREVIEW_ROWS
+          )
+        ]
       end
 
       def self.unquote(value)
@@ -191,6 +211,20 @@ module PortfolioPerformanceApi
           page_size: PREVIEW_ROWS,
           prompt: "[#{account_name}] import (Y)es or Esc/Q to skip?",
           choices: %w[Y]
+        ).run
+      end
+
+      def review_discarded(account_name, skipped)
+        return if Array(skipped).empty?
+
+        RowPreview.new(
+          account_name,
+          self.class.discarded_sections(skipped),
+          page_size: PREVIEW_ROWS,
+          prompt: "[#{account_name}] discarded #{skipped.size} — Enter/Q to continue",
+          choices: [],
+          acknowledge: true,
+          help: "↑/↓ row  u/v page ±#{PREVIEW_ROWS}  enter/q continue"
         ).run
       end
     end

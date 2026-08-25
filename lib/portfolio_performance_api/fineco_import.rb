@@ -19,7 +19,8 @@ module PortfolioPerformanceApi
     SHARE_MATCH_DAYS = 7
     CASH_MATCH_DAYS = 1
     ExistingTx = Struct.new(:id, :date, :cents, :security, :shares, keyword_init: true)
-    Result = Struct.new(:excluded, :existing, :candidates, keyword_init: true)
+    Skipped = Struct.new(:row, :reason, keyword_init: true)
+    Result = Struct.new(:excluded, :existing, :candidates, :skipped, keyword_init: true)
 
     module_function
 
@@ -27,17 +28,28 @@ module PortfolioPerformanceApi
       excluded, kept = FinecoXls.partition_excluded(rows, exclude)
       apply_matches!(kept, security_specs, offset_specs)
       assign_types!(kept, account, client)
-      validate_matches!(client, kept)
-      existing, candidates = partition_existing(kept, client, account)
-      Result.new(excluded: excluded, existing: existing, candidates: candidates)
+      invalid, valid = partition_invalid(kept, account, client)
+      existing, candidates = partition_existing(valid, client, account)
+      skipped = skipped_rows(excluded, "matched --exclude") +
+                invalid +
+                skipped_rows(existing, "already in portfolio")
+      Result.new(excluded: excluded, existing: existing, candidates: candidates, skipped: skipped)
     end
 
-    def append!(client, account, rows, at: Time.now.utc)
+    def append!(client, account, rows, at: Time.now.utc, skipped: nil)
       list = Array(rows)
       repair_cross_entries!(client, at: at)
       source = import_source(at: at)
-      list.each { |row| client.transactions << build_transaction(row, account, client: client, source: source) }
-      list.size
+      imported = 0
+      list.each do |row|
+        client.transactions << build_transaction(row, account, client: client, source: source)
+        imported += 1
+      rescue ArgumentError => error
+        raise unless skipped
+
+        skipped << Skipped.new(row: row, reason: error.message)
+      end
+      imported
     end
 
     # --- types -------------------------------------------------------------
@@ -79,10 +91,8 @@ module PortfolioPerformanceApi
     end
 
     def preview_type(row, account: nil, client: nil)
-      type = effective_type(row, account: account, client: client).to_s
-      return type unless type == "CASH_TRANSFER"
-
-      row.type.to_s == "REMOVAL" ? "TRANSFER_OUT" : "TRANSFER_IN"
+      type = effective_type(row, account: account, client: client)
+      (TransactionTypes.coerce(type, kind: :deposit) || type).to_s
     end
 
     # --- match specs -------------------------------------------------------
@@ -128,21 +138,49 @@ module PortfolioPerformanceApi
       rows
     end
 
-    def validate_matches!(client, rows)
+    def validate_matches!(client, rows, account: nil)
       Array(rows).each do |row|
-        if filled?(row.security) && find_security(client, row.security).nil?
-          raise ArgumentError, "security not found: #{row.security}"
-        end
-        if filled?(row.offset_account) && find_vehicle(client, row.offset_account).nil?
-          raise ArgumentError, "offset account not found: #{row.offset_account}"
-        end
-        next unless filled?(row.security) && filled?(row.offset_account)
+        reason = match_skip_reason(row, client, account)
+        raise ArgumentError, reason if reason
+      end
+    end
 
+    def match_skip_reason(row, client, account = nil)
+      if filled?(row.security) && find_security(client, row.security).nil?
+        return "security not found: #{row.security}"
+      end
+      if filled?(row.offset_account) && find_vehicle(client, row.offset_account).nil?
+        return "offset account not found: #{row.offset_account}"
+      end
+      if filled?(row.security) && filled?(row.offset_account)
         vehicle = find_vehicle(client, row.offset_account)
         unless vehicle&.kind == :securities
-          raise ArgumentError, "buy/sell offset must be a securities account: #{row.offset_account}"
+          return "buy/sell offset must be a securities account: #{row.offset_account}"
         end
       end
+
+      type = TransactionTypes.coerce(effective_type(row, account: account, client: client), kind: :deposit)
+      return "unsupported Portfolio Performance type: #{effective_type(row)}" if type.nil?
+
+      nil
+    end
+
+    def partition_invalid(rows, account, client)
+      invalid = []
+      valid = []
+      Array(rows).each do |row|
+        reason = match_skip_reason(row, client, account)
+        if reason
+          invalid << Skipped.new(row: row, reason: reason)
+        else
+          valid << row
+        end
+      end
+      [invalid, valid]
+    end
+
+    def skipped_rows(rows, reason)
+      Array(rows).map { |row| Skipped.new(row: row, reason: reason) }
     end
 
     # --- identity / already imported --------------------------------------

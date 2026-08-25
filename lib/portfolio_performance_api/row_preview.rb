@@ -10,7 +10,7 @@ module PortfolioPerformanceApi
   class RowPreview
     Section = Struct.new(:title, :lines, :counts, :page_size, :scroll, keyword_init: true)
 
-    def initialize(heading, sections, page_size:, prompt:, choices:)
+    def initialize(heading, sections, page_size:, prompt:, choices:, help: nil, acknowledge: false)
       @heading = heading
       @sections = Array(sections).map { |section| coerce_section(section) }
       raise ArgumentError, "preview needs at least one section" if @sections.empty?
@@ -25,6 +25,8 @@ module PortfolioPerformanceApi
       )
       @prompt = prompt
       @choices = Array(choices).map { |choice| choice.to_s.upcase }
+      @acknowledge = acknowledge
+      @help = help
       @reader = TTY::Reader.new(interrupt: :exit)
       @cursor = TTY::Cursor
       @drawn_lines = 0
@@ -94,6 +96,8 @@ module PortfolioPerformanceApi
 
     def static_choice
       render_lines.each { |line| $stdout.puts line }
+      return "N" if @acknowledge
+
       loop do
         $stderr.print "#{@prompt} "
         answer = $stdin.gets.to_s.strip.upcase
@@ -106,11 +110,18 @@ module PortfolioPerformanceApi
 
     def key_choice(event)
       return "N" if skip_key?(event)
+      return "N" if @acknowledge && enter_key?(event)
 
       value = event.value.to_s.upcase
       return value if @choices.include?(value)
 
       nil
+    end
+
+    def enter_key?(event)
+      return true if event.key&.name == :return || event.key&.name == :enter
+
+      ["\r", "\n"].include?(event.value)
     end
 
     def skip_key?(event)
@@ -146,7 +157,7 @@ module PortfolioPerformanceApi
         @heading,
         section_lines,
         @prompt,
-        "↑/↓ row  u/v page ±#{@window.page_size}  esc/q skip"
+        @help || "↑/↓ row  u/v page ±#{@window.page_size}  esc/q skip"
       ].flatten
     end
 
