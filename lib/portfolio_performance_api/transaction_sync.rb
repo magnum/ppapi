@@ -16,6 +16,7 @@ module PortfolioPerformanceApi
     DEPOSIT_EXTRA_KEYS = %i[security shares per_share offset_account note source].freeze
     SECURITIES_EXTRA_KEYS = %i[symbol isin shares quote fees taxes net].freeze
     DERIVED_EXTRA_KEYS = %i[per_share quote net].freeze
+    SECURITY_REF_KEYS = %i[security symbol isin].freeze
     SHARE_SCALE = 100_000_000
     EXTRA_HEADERS = {
       security: [/\Asecurity\z/, /\Atitolo\z/],
@@ -250,7 +251,13 @@ module PortfolioPerformanceApi
       sheet_records = parse_sheet(
         raw_rows, vehicle.name, currency: vehicle.currency, skip_rows: skip_rows, kind: vehicle.kind
       )
-      plan(portfolio_records, sheet_records, names_index: name_index(client), extra_keys: extra_keys_for(vehicle.kind))
+      plan(
+        portfolio_records,
+        sheet_records,
+        names_index: name_index(client),
+        extra_keys: extra_keys_for(vehicle.kind),
+        securities: Array(client.securities)
+      )
     end
 
     def split_plan(plan)
@@ -270,7 +277,7 @@ module PortfolioPerformanceApi
       ]
     end
 
-    def plan(portfolio_records, sheet_records, names_index: {}, extra_keys: [])
+    def plan(portfolio_records, sheet_records, names_index: {}, extra_keys: [], securities: [])
       create_sheet = []
       create_portfolio = []
       update_sheet = []
@@ -287,7 +294,9 @@ module PortfolioPerformanceApi
             merged.row_number = row.row_number
             update_sheet << merged
           end
-          update_portfolio << merged unless same_proto?(proto, merged)
+          update_portfolio << merged unless same_proto?(
+            proto, merged, names_index: names_index, securities: securities
+          )
         end
       end
 
@@ -513,12 +522,34 @@ module PortfolioPerformanceApi
         same_extras?(row.extras, merged.extras, merged.extras.to_h.keys)
     end
 
-    def same_proto?(proto, merged)
-      keys = merged.extras.to_h.keys - DERIVED_EXTRA_KEYS
+    def same_proto?(proto, merged, names_index: {}, securities: [])
+      keys = merged.extras.to_h.keys - DERIVED_EXTRA_KEYS - SECURITY_REF_KEYS - %i[offset_account]
       proto.type == merged.type &&
         proto.uuid.to_s == merged.uuid.to_s &&
-        proto.destination.to_s == merged.destination.to_s &&
-        same_extras?(proto.extras, merged.extras, keys)
+        same_destination?(proto.destination, merged.destination, names_index) &&
+        same_extras?(proto.extras, merged.extras, keys) &&
+        same_security_ref?(proto, merged, securities)
+    end
+
+    def same_destination?(proto_dest, merged_dest, names_index)
+      return true if proto_dest.to_s.strip == merged_dest.to_s.strip
+
+      merged_hit = lookup_name(names_index, merged_dest)
+      return true unless merged_hit
+
+      proto_hit = lookup_name(names_index, proto_dest)
+      proto_hit&.uuid == merged_hit.uuid
+    end
+
+    def same_security_ref?(proto, merged, securities)
+      extras = merged.extras.to_h
+      return true unless extras.keys.any? { |key| SECURITY_REF_KEYS.include?(key) }
+
+      merged_sec = lookup_security_list(securities, extras)
+      return true unless merged_sec
+
+      proto_sec = lookup_security_list(securities, proto.extras.to_h)
+      proto_sec&.uuid == merged_sec.uuid
     end
 
     def find_transaction(client, vehicle, record, names: {})
@@ -832,14 +863,18 @@ module PortfolioPerformanceApi
     end
 
     def lookup_security(client, extras)
-      securities = Array(client&.securities)
+      lookup_security_list(Array(client&.securities), extras)
+    end
+
+    def lookup_security_list(securities, extras)
+      extras = extras.to_h
       isin = extras[:isin].to_s.strip
       symbol = extras[:symbol].to_s.strip
       name = extras[:security].to_s.strip
-      found = securities.find { |item| !isin.empty? && security_attr(item, :isin) == isin }
-      found ||= securities.find { |item| !symbol.empty? && security_attr(item, :tickerSymbol).casecmp?(symbol) }
-      found ||= securities.find { |item| !name.empty? && item.name == name }
-      found || securities.find { |item| !name.empty? && item.name.casecmp?(name) }
+      found = Array(securities).find { |item| !isin.empty? && security_attr(item, :isin).casecmp?(isin) }
+      found ||= Array(securities).find { |item| !symbol.empty? && security_attr(item, :tickerSymbol).casecmp?(symbol) }
+      found ||= Array(securities).find { |item| !name.empty? && item.name == name }
+      found || Array(securities).find { |item| !name.empty? && item.name.casecmp?(name) }
     end
 
     def apply_units!(tx, extras)
@@ -871,7 +906,8 @@ module PortfolioPerformanceApi
                          :extra_columns, :extras_from_proto, :extras_from_sheet, :parse_extra,
                          :parse_extra_number, :parse_decimal, :per_share_value, :unit_cents, :security_attr,
                          :merge_extras, :same_extras?, :extra_equal?, :extra_present?, :extra_cell,
-                         :format_extra, :write_cell, :apply_extras!, :lookup_security, :apply_units!,
+                         :format_extra, :write_cell, :apply_extras!, :lookup_security, :lookup_security_list,
+                         :apply_units!, :same_destination?, :same_security_ref?,
                          :ensure_headers, :extra_header_present?, :extra_key_for_label
   end
 end

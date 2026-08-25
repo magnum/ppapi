@@ -575,6 +575,47 @@ class TransactionSyncTest < Minitest::Test
     assert_equal 100, buy.units.find { |unit| unit.type == :TAX }.amount
   end
 
+  def test_plan_does_not_update_portfolio_when_ticker_only_differs_by_case
+    date = Date.new(2026, 8, 13)
+    proto = record(
+      "Deposito titoli", date, -100_000, "VWCE", "PURCHASE", "tx-buy", nil, "Conto corrente",
+      extras: { symbol: "VWCE", isin: "IE00BK5BQT80", shares: 100_000_000 }
+    )
+    sheet = record(
+      "Deposito titoli", date, -100_000, "VWCE", "PURCHASE", "tx-buy", 2, "Conto corrente",
+      extras: { symbol: "vwce", isin: "ie00bk5bqt80", shares: 100_000_000 }
+    )
+    security = PortfolioPerformanceApi::Proto::PSecurity.new(
+      uuid: "sec-etf", name: "VWCE", isin: "IE00BK5BQT80", tickerSymbol: "VWCE"
+    )
+
+    plan = PortfolioPerformanceApi::TransactionSync.plan(
+      [proto],
+      [sheet],
+      extra_keys: PortfolioPerformanceApi::TransactionSync::SECURITIES_EXTRA_KEYS,
+      securities: [security]
+    )
+
+    assert_empty plan.update_portfolio
+    assert_empty plan.create_portfolio
+  end
+
+  def test_apply_portfolio_returns_zero_when_existing_transaction_is_unchanged
+    client = protobuf_client
+    stamp = Google::Protobuf::Timestamp.new(seconds: Time.utc(2026, 8, 13).to_i)
+    buy = client.transactions.find { |tx| tx.uuid == "tx-buy" }
+    buy.date = stamp
+    vehicle = PortfolioPerformanceApi::TransactionSync.vehicles(client).find { |item| item.kind == :securities }
+    names = PortfolioPerformanceApi::TransactionSync.uuid_names(client)
+    proto = PortfolioPerformanceApi::TransactionSync.from_proto(
+      buy, vehicle, names: names, security_names: { "sec-etf" => "VWCE" },
+      securities: { "sec-etf" => client.securities.first }
+    )
+
+    applied = PortfolioPerformanceApi::TransactionSync.apply_portfolio!(client, vehicle, [proto])
+    assert_equal 0, applied
+  end
+
   def test_apply_creates_deposit_with_security_shares_and_source
     client = protobuf_client
     cash = PortfolioPerformanceApi::TransactionSync.vehicles(client).find { |item| item.name == "Conto corrente" }

@@ -57,9 +57,11 @@ class TransactionSyncRoundtripTest < Minitest::Test
   end
 
   def test_same_proto_ignores_derived_extras
-    keys = SYNC::SECURITIES_EXTRA_KEYS - SYNC::DERIVED_EXTRA_KEYS
+    keys = SYNC::SECURITIES_EXTRA_KEYS - SYNC::DERIVED_EXTRA_KEYS - SYNC::SECURITY_REF_KEYS
     assert_includes keys, :shares
     refute_includes keys, :quote
     refute_includes keys, :net
+    refute_includes keys, :symbol
+    refute_includes keys, :isin
   end
 end

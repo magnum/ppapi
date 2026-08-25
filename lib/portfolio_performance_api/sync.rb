@@ -87,9 +87,13 @@ module PortfolioPerformanceApi
               vehicle,
               records
             )
-            portfolio_changed ||= applied.positive?
-            names = TransactionSync.uuid_names(loaded.client)
-            puts "#{vehicle.name}: portfolio updated"
+            if applied.positive?
+              portfolio_changed = true
+              names = TransactionSync.uuid_names(loaded.client)
+              puts "#{vehicle.name}: portfolio updated"
+            else
+              puts "#{vehicle.name}: portfolio unchanged"
+            end
           end
         end
       end
