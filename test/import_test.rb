@@ -192,7 +192,7 @@ class ImportTest < Minitest::Test
     assert_includes line, "PURCHASE"
   end
 
-  def test_fineco_format_row_shows_transfer_direction
+  def test_fineco_format_row_shows_written_transfer_type
     inbound = PortfolioPerformanceApi::FinecoXls::Row.new(
       date: Date.new(2025, 10, 29),
       description: "Cambio valuta Compravendita Divise",
@@ -204,8 +204,12 @@ class ImportTest < Minitest::Test
     outbound.type = :REMOVAL
     outbound.amount_cents = 550_000
 
-    assert_includes PortfolioPerformanceApi::Import::Fineco.format_row(inbound, width: 160), "TRANSFER_IN"
-    assert_includes PortfolioPerformanceApi::Import::Fineco.format_row(outbound, width: 160), "TRANSFER_OUT"
+    inbound_line = PortfolioPerformanceApi::Import::Fineco.format_row(inbound, width: 160)
+    outbound_line = PortfolioPerformanceApi::Import::Fineco.format_row(outbound, width: 160)
+    assert_includes inbound_line, "CASH_TRANSFER"
+    assert_includes outbound_line, "CASH_TRANSFER"
+    refute_includes inbound_line, "TRANSFER_IN"
+    refute_includes outbound_line, "TRANSFER_OUT"
   end
 
   def test_preview_sections_puts_excluded_above_import
@@ -360,6 +364,58 @@ class ImportTest < Minitest::Test
     assert_equal 10, sections[0].page_size
     refute_equal false, sections[0].scroll
     assert(sections[0].lines.all? { |line| line.include?("Cambio valuta") })
+  end
+
+  def test_format_row_puts_discard_reason_last
+    row = PortfolioPerformanceApi::FinecoXls::Row.new(
+      date: Date.new(2026, 8, 15),
+      description: "Compravendita Titoli AMAZON.COM Qta/Val.nom. 1,000000",
+      amount_cents: 1_000,
+      type: :REMOVAL,
+      security: "AMAZON.COM",
+      offset_account: "Deposito titoli"
+    )
+    line = PortfolioPerformanceApi::Import::Fineco.format_row(
+      row, width: 160, reason: "security not found: AMAZON.COM"
+    )
+
+    assert_includes line, "PURCHASE"
+    assert line.end_with?("security not found: AMAZON.COM")
+    assert_operator line.index("PURCHASE"), :<, line.index("security not found")
+  end
+
+  def test_discarded_sections_are_scrollable_ten_rows_with_reason
+    skipped = (1..15).map do |index|
+      row = PortfolioPerformanceApi::FinecoXls::Row.new(
+        date: Date.new(2026, 8, 1),
+        description: "Dropped #{index}",
+        amount_cents: 100,
+        type: :DEPOSIT
+      )
+      PortfolioPerformanceApi::FinecoImport::Skipped.new(row: row, reason: "matched --exclude")
+    end
+    sections = PortfolioPerformanceApi::Import::Fineco.discarded_sections(skipped, width: 120)
+
+    assert_equal ["DISCARDED"], sections.map(&:title)
+    assert_equal 15, sections[0].lines.size
+    assert_equal 10, sections[0].page_size
+    refute_equal false, sections[0].scroll
+    assert_includes sections[0].lines.first, "Dropped 1"
+    assert sections[0].lines.first.end_with?("matched --exclude")
+
+    preview = PortfolioPerformanceApi::RowPreview.new(
+      "EUR",
+      sections,
+      page_size: PortfolioPerformanceApi::Import::Fineco::PREVIEW_ROWS,
+      prompt: "continue?",
+      choices: [],
+      acknowledge: true
+    )
+    window = preview.instance_variable_get(:@window)
+    assert_equal 10, window.visible(0).size
+    assert_includes window.visible(0).first, "Dropped 1"
+    window.down
+    assert_includes window.visible(0).first, "Dropped 2"
   end
 
   def test_copies_backup_without_changing_source

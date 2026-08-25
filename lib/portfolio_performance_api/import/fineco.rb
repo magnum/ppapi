@@ -45,27 +45,30 @@ module PortfolioPerformanceApi
         end
 
         print_summary(account, loaded.client, options, result, backup)
-        if result.candidates.any? || result.excluded.any? || result.existing.any?
-          if preview(account.name, result, exclude: options[:exclude]) != "Y"
-            puts "#{account.name}: skipped"
-            return
-          end
+        confirmed = result.candidates.any? || result.excluded.any? || result.existing.any?
+        if confirmed && preview(account.name, result, exclude: options[:exclude]) != "Y"
+          puts "#{account.name}: skipped"
+          return
         end
 
-        repaired = FinecoImport.repair_cross_entries!(loaded.client)
-        imported = if result.candidates.empty?
-          0
-        else
-          FinecoImport.append!(loaded.client, account, result.candidates, skipped: skipped)
-        end
-        if imported.positive? || repaired.positive?
-          @session.persist(loaded, drive)
-          uploaded = true
-          puts "Imported #{imported} transactions into #{loaded.path}" if imported.positive?
-          puts "Repaired #{repaired} cross-entry UUIDs" if repaired.positive?
-          puts "Uploaded portfolio #{File.basename(loaded.path)}"
-        elsif skipped.empty?
-          warn "nothing to import"
+        imported = 0
+        repaired = 0
+        if confirmed
+          repaired = FinecoImport.repair_cross_entries!(loaded.client)
+          imported = if result.candidates.empty?
+            0
+          else
+            FinecoImport.append!(loaded.client, account, result.candidates, skipped: skipped)
+          end
+          if imported.positive? || repaired.positive?
+            @session.persist(loaded, drive)
+            uploaded = true
+            puts "Imported #{imported} transactions into #{loaded.path}" if imported.positive?
+            puts "Repaired #{repaired} cross-entry UUIDs" if repaired.positive?
+            puts "Uploaded portfolio #{File.basename(loaded.path)}"
+          elsif skipped.empty?
+            warn "nothing to import"
+          end
         end
         review_discarded(account.name, skipped)
       rescue Error, ArgumentError, RegexpError => error
@@ -201,6 +204,7 @@ module PortfolioPerformanceApi
         options[:match_security].each { |pattern| puts "Match security: #{pattern}" }
         options[:match_offset_account].each { |spec| puts "Match offset account: #{spec}" }
         puts "Already in portfolio: #{result.existing.size}" if result.existing.any?
+        puts "Discarded: #{result.skipped.size}" if Array(result.skipped).any?
         puts "Backup: #{backup}"
       end
 

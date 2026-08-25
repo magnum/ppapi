@@ -49,12 +49,12 @@ class ImportKindTest < Minitest::Test
     assert_equal :DEPOSIT, rows[1].proto_type
   end
 
-  def test_preview_labels_transfer_direction_from_fineco_sign
+  def test_preview_labels_use_written_proto_type
     inbound = row_for(type: :DEPOSIT, offset_account: "EUR")
     outbound = row_for(type: :REMOVAL, offset_account: "EUR")
 
-    assert_equal "TRANSFER_IN", PortfolioPerformanceApi::FinecoImport.preview_type(inbound)
-    assert_equal "TRANSFER_OUT", PortfolioPerformanceApi::FinecoImport.preview_type(outbound)
+    assert_equal "CASH_TRANSFER", PortfolioPerformanceApi::FinecoImport.preview_type(inbound)
+    assert_equal "CASH_TRANSFER", PortfolioPerformanceApi::FinecoImport.preview_type(outbound)
     assert_equal "DEPOSIT", PortfolioPerformanceApi::FinecoImport.preview_type(row_for(type: :DEPOSIT))
     assert_equal "PURCHASE",
                  PortfolioPerformanceApi::FinecoImport.preview_type(row_for(type: :REMOVAL, security: "VWCE", offset_account: "t"))

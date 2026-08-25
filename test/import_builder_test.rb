@@ -230,6 +230,8 @@ class ImportBuilderTest < Minitest::Test
     assert_equal "VWCE", buy.security
     assert_equal "Deposito titoli", buy.offset_account
     assert_empty result.existing
+    assert_equal 1, result.skipped.size
+    assert_equal "matched --exclude", result.skipped.first.reason
   end
 
   def test_prepare_rejects_unknown_matched_security
@@ -245,16 +247,18 @@ class ImportBuilderTest < Minitest::Test
       )
     ]
 
-    error = assert_raises(ArgumentError) do
-      PortfolioPerformanceApi::FinecoImport.prepare(
-        client,
-        account,
-        rows,
-        security_specs: ["/Compravendita Titoli (.+?) Qta/"],
-        offset_specs: ["/Compravendita Titoli/Deposito titoli"]
-      )
-    end
-    assert_includes error.message, "security not found: AMAZON.COM"
+    result = PortfolioPerformanceApi::FinecoImport.prepare(
+      client,
+      account,
+      rows,
+      security_specs: ["/Compravendita Titoli (.+?) Qta/"],
+      offset_specs: ["/Compravendita Titoli/Deposito titoli"]
+    )
+
+    assert_empty result.candidates
+    assert_equal 1, result.skipped.size
+    assert_equal "security not found: AMAZON.COM", result.skipped.first.reason
+    assert_includes result.skipped.first.row.description, "AMAZON.COM"
   end
 
   private

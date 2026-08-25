@@ -232,6 +232,27 @@ class PreviewWindowTest < Minitest::Test
     assert_equal "Y", preview.send(:key_choice, event.new(key: nil, value: "y"))
   end
 
+  def test_acknowledge_preview_continues_on_enter
+    preview = PortfolioPerformanceApi::RowPreview.new(
+      "EUR010069756",
+      [{ title: "DISCARDED", lines: ["-  row  matched --exclude"] }],
+      page_size: 10,
+      prompt: "[EUR010069756] discarded 1 — Enter/Q to continue",
+      choices: [],
+      acknowledge: true,
+      help: "enter/q continue"
+    )
+    event = Struct.new(:key, :value, keyword_init: true)
+    key = Struct.new(:name)
+    lines = preview.send(:render_lines)
+
+    assert_includes lines, "DISCARDED  1-1/1"
+    assert_includes lines, "enter/q continue"
+    assert_equal "N", preview.send(:key_choice, event.new(key: key.new(:return), value: "\r"))
+    assert_equal "N", preview.send(:key_choice, event.new(key: nil, value: "q"))
+    assert_nil preview.send(:key_choice, event.new(key: nil, value: "y"))
+  end
+
   private
 
   def record(date, cents, description, type)

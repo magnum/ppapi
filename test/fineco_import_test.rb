@@ -559,8 +559,8 @@ class FinecoImportTest < Minitest::Test
 
     assert_equal :CASH_TRANSFER, outbound.proto_type
     assert_equal :CASH_TRANSFER, inbound.proto_type
-    assert_equal "TRANSFER_OUT", PortfolioPerformanceApi::FinecoImport.preview_type(outbound)
-    assert_equal "TRANSFER_IN", PortfolioPerformanceApi::FinecoImport.preview_type(inbound)
+    assert_equal "CASH_TRANSFER", PortfolioPerformanceApi::FinecoImport.preview_type(outbound)
+    assert_equal "CASH_TRANSFER", PortfolioPerformanceApi::FinecoImport.preview_type(inbound)
 
     assert_equal :CASH_TRANSFER, out_tx.type
     assert_equal "acc-usd", out_tx.account

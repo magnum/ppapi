@@ -121,7 +121,7 @@ bin/import fineco USD010069756 import/test_usd.xlsx --skip-lines=7 \
 
 Account names may contain spaces: quotes are optional. The last argument is the Excel file; everything before it is the account name.
 
-Preview shows **EXCLUDED** first (every matching `--exclude` row), then **EXISTING** (already in the portfolio by hash), then **IMPORT**. Each list shows at most 10 rows; arrows scroll all three together. Keys: ↑/↓ one row, `u`/`v` page, **Y** import, **Esc** or **Q** skip. Password: `PORTFOLIO_PASSWORD`. Sample export: `import/test.xlsx`.
+Preview shows **EXCLUDED** first (every matching `--exclude` row), then **EXISTING** (already in the portfolio by hash), then **IMPORT**. Each list shows at most 10 rows; arrows scroll all three together. Type labels are the protobuf names that will be written (`CASH_TRANSFER`, not Java `TRANSFER_IN` / `TRANSFER_OUT`). Keys: ↑/↓ one row, `u`/`v` page, **Y** import, **Esc** or **Q** skip. After import, if any rows were not written, the same table shows **DISCARDED** (10 scrollable rows) with the reason in the last column (`matched --exclude`, `already in portfolio`, `security not found: …`). Enter/Q continues. Password: `PORTFOLIO_PASSWORD`. Sample export: `import/test.xlsx`.
 
 ## Spreadsheet sync
 
