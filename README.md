@@ -142,6 +142,8 @@ Keys: ↑/↓ one row, `u`/`v` page, **S** spreadsheet only, **P** portfolio onl
 
 Columns: `date`, `type`, `amount`, `currency`, `description`, `destination`, `uuid`. Sync also writes extra columns (added if missing) that are never used for the identity hash: deposit sheets get `security`, `shares`, `per share`, `offset account`, `note`, `source`; securities sheets get `symbol`, `isin`, `shares`, `quote`, `fees`, `taxes`, `net transaction value`. Empty extra cells are filled from the portfolio; a non-empty sheet cell wins. Securities are looked up (ISIN, then symbol, then name) and never created. `SYNC_GOOGLE_DRIVE_FILE_SKIP_ROWS` leaves the first N rows untouched.
 
+`type` must be a protobuf enum from [Portfolio Performance](https://github.com/portfolio-performance/portfolio) (`PURCHASE SALE INBOUND_DELIVERY OUTBOUND_DELIVERY SECURITY_TRANSFER CASH_TRANSFER DEPOSIT REMOVAL DIVIDEND INTEREST INTEREST_CHARGE TAX TAX_REFUND FEE FEE_REFUND`). Java/XML/CSV labels (`BUY`, `FEES`, `TAXES`, `DIVIDENDS`, `TRANSFER_IN`, Compra, Commissioni, …) are remapped to those names. Unknown tokens fall back to `DEPOSIT`/`REMOVAL` from the amount sign. Types that cannot live on that account (for example `FEE` on a securities sheet) are skipped. Buy/sell, cash transfer, and security transfer are written only when PP can load them (`otherUuid`, counterpart account/portfolio, security); otherwise the row is not imported. That avoids `UnsupportedOperationException` on open.
+
 Sheet tabs are named `deposit - {account}` and `securities - {account}` so a cash account and a securities account can share the same Portfolio Performance name.
 
 ## Tests

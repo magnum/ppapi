@@ -7,6 +7,7 @@ require "time"
 
 require_relative "proto/client_pb"
 require_relative "transaction_identity"
+require_relative "transaction_types"
 
 module PortfolioPerformanceApi
   module TransactionSync
@@ -35,16 +36,8 @@ module PortfolioPerformanceApi
     OUTFLOW_TYPES = %w[
       PURCHASE SALE OUTBOUND_DELIVERY REMOVAL INTEREST_CHARGE TAX FEE
     ].freeze
-    TYPE_ALIASES = {
-      "withdrawal" => "REMOVAL",
-      "prelievo" => "REMOVAL",
-      "uscite" => "REMOVAL",
-      "deposit" => "DEPOSIT",
-      "versamento" => "DEPOSIT",
-      "entrate" => "DEPOSIT",
-      "transfer" => "CASH_TRANSFER",
-      "trasferimento" => "CASH_TRANSFER"
-    }.freeze
+    TYPE_ALIASES = TransactionTypes::ALIASES
+    PROTO_TYPES = TransactionTypes::PROTO
     DEFAULT_COLUMNS = {
       date: 0,
       type: 1,
@@ -83,14 +76,11 @@ module PortfolioPerformanceApi
       TransactionIdentity.normalize_description(value)
     end
 
-    def normalize_type(value, signed_cents = nil)
-      text = value.to_s.strip
-      return TYPE_ALIASES[text.downcase] if TYPE_ALIASES.key?(text.downcase)
-      return text.upcase if text.match?(/\A[A-Z_]+\z/)
-      return "REMOVAL" if signed_cents.to_i.negative?
-      return "DEPOSIT" if signed_cents.to_i.positive?
+    def normalize_type(value, signed_cents = nil, kind: nil)
+      type = TransactionTypes.normalize(value, signed_cents, kind: kind)
+      return type if kind.nil?
 
-      nil
+      TransactionTypes.coerce(type, kind: kind)
     end
 
     def vehicles(client)
@@ -172,7 +162,7 @@ module PortfolioPerformanceApi
         next if index < skip_rows
         next if header_row?(row)
 
-        record = from_sheet_row(row, account_name, currency: currency, mapping: mapping)
+        record = from_sheet_row(row, account_name, currency: currency, mapping: mapping, kind: kind)
         next unless record
 
         record.row_number = index + 1
@@ -180,7 +170,7 @@ module PortfolioPerformanceApi
       end
     end
 
-    def from_sheet_row(row, account_name, currency:, mapping: DEFAULT_COLUMNS)
+    def from_sheet_row(row, account_name, currency:, mapping: DEFAULT_COLUMNS, kind: :deposit)
       cells = Array(row)
       return if header_row?(cells)
 
@@ -189,7 +179,7 @@ module PortfolioPerformanceApi
       description = normalize_description(cells[mapping[:description]])
       return if date.nil? || amount.nil?
 
-      type = normalize_type(cells[mapping[:type]], amount)
+      type = normalize_type(cells[mapping[:type]], amount, kind: kind)
       return if type.nil?
 
       extras = extras_from_sheet(cells, mapping)
@@ -313,11 +303,16 @@ module PortfolioPerformanceApi
       names = name_index(client)
       changed = 0
       records.each do |record|
+        next unless TransactionTypes.coerce(record.type, kind: vehicle.kind)
+
         existing = find_transaction(client, vehicle, record, names: uuid_names(client))
         if existing
           changed += 1 if update_transaction!(existing, record, vehicle, names, client)
         else
-          client.transactions << build_transaction(vehicle, record, names, client)
+          tx = build_transaction(vehicle, record, names, client)
+          next unless TransactionTypes.loadable?(tx)
+
+          client.transactions << tx
           changed += 1
         end
       end
@@ -570,9 +565,13 @@ module PortfolioPerformanceApi
     end
 
     def update_transaction!(tx, record, vehicle, names, client = nil)
+      type = TransactionTypes.coerce(record.type, kind: vehicle.kind)
+      return false if type.nil?
+
+      snapshot = Proto::PTransaction.encode(tx)
       changed = false
-      if tx.type.to_s != record.type
-        tx.type = record.type
+      if tx.type.to_s != type
+        tx.type = type
         changed = true
       end
       amount = record.signed_cents.abs
@@ -586,17 +585,26 @@ module PortfolioPerformanceApi
       end
       counterpart = assign_counterpart!(tx, vehicle, record, names)
       extras = apply_extras!(tx, record, client)
-      changed || counterpart || extras
+      stamped = stamp_cross_entry!(tx)
+      if TransactionTypes.loadable?(tx)
+        return changed || counterpart || extras || stamped
+      end
+
+      restore_transaction!(client, tx, snapshot)
+      false
     end
 
     def build_transaction(vehicle, record, names, client = nil)
+      type = TransactionTypes.coerce(record.type, kind: vehicle.kind)
+      raise ArgumentError, "unsupported transaction type for #{vehicle.kind}: #{record.type}" if type.nil?
+
       now = Time.now.utc
       date = Time.utc(record.date.year, record.date.month, record.date.day)
       extras = record.extras.to_h
       note = extra_present?(extras[:note]) ? extras[:note].to_s : record.description
       tx = Proto::PTransaction.new(
         uuid: record.uuid.to_s.empty? ? SecureRandom.uuid : record.uuid,
-        type: record.type,
+        type: type,
         date: Google::Protobuf::Timestamp.new(seconds: date.to_i),
         currencyCode: record.currency.to_s.empty? ? vehicle.currency : record.currency,
         amount: record.signed_cents.abs,
@@ -612,7 +620,33 @@ module PortfolioPerformanceApi
       end
       assign_counterpart!(tx, vehicle, record, names)
       apply_extras!(tx, record, client)
+      stamp_cross_entry!(tx)
       tx
+    end
+
+    def stamp_cross_entry!(tx, at: Time.now.utc)
+      return false unless TransactionTypes::CROSS_ENTRY.include?(tx.type.to_s)
+
+      changed = false
+      if tx.otherUuid.to_s.empty?
+        tx.otherUuid = SecureRandom.uuid
+        changed = true
+      end
+      unless tx.has_otherUpdatedAt?
+        now = at.utc
+        tx.otherUpdatedAt = Google::Protobuf::Timestamp.new(seconds: now.to_i, nanos: now.nsec)
+        changed = true
+      end
+      changed
+    end
+
+    def restore_transaction!(client, tx, snapshot)
+      return unless client
+
+      index = client.transactions.find_index { |item| item.equal?(tx) }
+      return unless index
+
+      client.transactions[index] = Proto::PTransaction.decode(snapshot)
     end
 
     def assign_counterpart!(tx, vehicle, record, names)
@@ -908,6 +942,7 @@ module PortfolioPerformanceApi
                          :merge_extras, :same_extras?, :extra_equal?, :extra_present?, :extra_cell,
                          :format_extra, :write_cell, :apply_extras!, :lookup_security, :lookup_security_list,
                          :apply_units!, :same_destination?, :same_security_ref?,
-                         :ensure_headers, :extra_header_present?, :extra_key_for_label
+                         :ensure_headers, :extra_header_present?, :extra_key_for_label,
+                         :stamp_cross_entry!, :restore_transaction!
   end
 end

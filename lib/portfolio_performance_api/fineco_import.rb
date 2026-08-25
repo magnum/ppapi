@@ -8,12 +8,13 @@ require_relative "fineco_xls"
 require_relative "proto/client_pb"
 require_relative "transaction_identity"
 require_relative "transaction_sync"
+require_relative "transaction_types"
 
 module PortfolioPerformanceApi
   # Fineco row → Portfolio Performance transaction.
   module FinecoImport
     DEFAULT_SECURITY_SPEC = "/Compravendita Titoli\\s+(.+?)\\s+Qta/"
-    CROSS_ENTRY_TYPES = %w[CASH_TRANSFER PURCHASE SALE SECURITY_TRANSFER].freeze
+    CROSS_ENTRY_TYPES = TransactionTypes::CROSS_ENTRY
     SHARE_DIVISOR = 100_000_000
     SHARE_MATCH_DAYS = 7
     CASH_MATCH_DAYS = 1
@@ -209,7 +210,9 @@ module PortfolioPerformanceApi
     def build_transaction(row, account, client: nil, source: nil, at: Time.now.utc)
       now = at.utc
       date = Time.utc(row.date.year, row.date.month, row.date.day)
-      type = effective_type(row, account: account, client: client)
+      type = TransactionTypes.coerce(effective_type(row, account: account, client: client), kind: :deposit)
+      raise ArgumentError, "unsupported Portfolio Performance type: #{effective_type(row)}" if type.nil?
+
       tx = Proto::PTransaction.new(
         uuid: SecureRandom.uuid,
         type: type,
@@ -223,7 +226,18 @@ module PortfolioPerformanceApi
         source: source || import_source(at: now)
       )
       assign_counterparts!(tx, row, account, client)
+      assert_pp_safe!(tx)
       tx
+    end
+
+    def assert_pp_safe!(tx)
+      type = tx.type.to_s
+      unless TransactionTypes.proto?(type)
+        raise ArgumentError, "unsupported Portfolio Performance type: #{type}"
+      end
+      return if TransactionTypes.loadable?(tx)
+
+      raise ArgumentError, "transaction is not loadable by Portfolio Performance: #{type}"
     end
 
     def repair_cross_entries!(client, at: Time.now.utc)

@@ -79,7 +79,7 @@ class TransactionSyncTest < Minitest::Test
     )
     proto = PortfolioPerformanceApi::TransactionSync.from_proto(tx, vehicle)
     row = PortfolioPerformanceApi::TransactionSync.to_sheet_row(proto)
-    parsed = PortfolioPerformanceApi::TransactionSync.from_sheet_row(row, "Crypto", currency: "EUR")
+      parsed = PortfolioPerformanceApi::TransactionSync.from_sheet_row(row, "Crypto", currency: "EUR", kind: :securities)
     plan = PortfolioPerformanceApi::TransactionSync.plan([proto], [parsed])
 
     assert_equal 0, proto.signed_cents
@@ -300,6 +300,8 @@ class TransactionSyncTest < Minitest::Test
     assert_equal :CASH_TRANSFER, imported.type
     assert_equal "acc-cash", imported.account
     assert_equal "acc-savings", imported.otherAccount
+    refute imported.otherUuid.to_s.empty?
+    assert imported.has_otherUpdatedAt?
     assert_equal "Giroconto", imported.note
   end
 
@@ -632,6 +634,8 @@ class TransactionSyncTest < Minitest::Test
     assert_equal "sheet", imported.source
     assert_equal "custom note", imported.note
     assert_equal "port-titoli", imported.portfolio
+    refute imported.otherUuid.to_s.empty?
+    assert imported.has_otherUpdatedAt?
   end
 
   def test_materialize_keeps_unknown_columns
