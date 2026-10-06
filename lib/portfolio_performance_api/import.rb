@@ -21,7 +21,7 @@ module PortfolioPerformanceApi
     end
 
     def self.usage
-      "Usage: bin/import PROVIDER ACCOUNT XLS [--exclude REGEXP] [--skip-lines N] " \
+      "Usage: bin/import PROVIDER ACCOUNT [--file XLS] [XLS] [--exclude REGEXP] [--skip-lines N] " \
         "[--match-security [/REGEXP/VALUE]] [--match-offset-account /REGEXP/VALUE]\n" \
         "Providers: #{PROVIDERS.keys.join(", ")}"
     end

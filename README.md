@@ -91,6 +91,7 @@ Needs an interactive terminal and `bundle install` without `BUNDLE_WITHOUT=utils
 
 ```bash
 bin/import fineco EUR010069756 ./movements.xlsx
+bin/import fineco EUR010069756 --file ~/Desktop/movements.xlsx --exclude "MULTIFUNZIONE CONTACTLESS"
 bin/import fineco EUR010069756 test ./movements.xlsx
 bin/import fineco "EUR010069756 test" ./movements.xlsx --exclude "compravendita valute"
 bin/import fineco USD010069756 import/test_usd.xlsx --skip-lines=7
@@ -119,7 +120,15 @@ bin/import fineco USD010069756 import/test_usd.xlsx --skip-lines=7 \
   --match-offset-account "/Compravendita Divise/EUR010069756"
 ```
 
-Account names may contain spaces: quotes are optional. The last argument is the Excel file; everything before it is the account name.
+Account names may contain spaces: quotes are optional. The Excel file can be the last argument or `--file` / `--xls` (easier for tab completion). Everything else before the file is the account name.
+
+Tab completion of `.xls` / `.xlsx` paths is a zsh feature, not Ruby. `bin/import` is often completed as ImageMagick `import`, which does not offer files. Enable the repo completer (after `compinit` in `~/.zshrc`):
+
+```zsh
+source ~/projects/ppapi/completions/ppapi.zsh
+```
+
+Then `bin/import fineco EUR010069756 --file ~/Desktop/mov<TAB>` lists Excel files. Prefer `~/Desktop/...` over `$HOME/Desktop/...`: zsh expands `~` while completing, not `$HOME`.
 
 Preview shows **EXCLUDED** first (every matching `--exclude` row), then **EXISTING** (already in the portfolio by hash), then **IMPORT**. Each list shows at most 10 rows; arrows scroll all three together. Type labels are the protobuf names that will be written (`CASH_TRANSFER`, not Java `TRANSFER_IN` / `TRANSFER_OUT`). Keys: ↑/↓ one row, `u`/`v` page, **Y** import, **Esc** or **Q** skip. After import, if any rows were not written, the same table shows **DISCARDED** (10 scrollable rows) with the reason in the last column (`matched --exclude`, `already in portfolio`, `security not found: …`). Enter/Q continues. Password: `PORTFOLIO_PASSWORD`. Sample export: `import/test.xlsx`.
 

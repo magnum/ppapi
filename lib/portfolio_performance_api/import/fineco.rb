@@ -85,8 +85,11 @@ module PortfolioPerformanceApi
           match_offset_account: []
         }
         parser = OptionParser.new do |opts|
-          opts.banner = "Usage: bin/import fineco ACCOUNT XLS [--exclude REGEXP] [--skip-lines N] " \
+          opts.banner = "Usage: bin/import fineco ACCOUNT [--file XLS] [XLS] [--exclude REGEXP] [--skip-lines N] " \
                         "[--match-security [/REGEXP/VALUE]] [--match-offset-account /REGEXP/VALUE]"
+          opts.on("--file PATH", "--xls PATH", "Fineco .xls / .xlsx export (tab-completes as a file)") do |value|
+            options[:xls] = File.expand_path(unquote(value))
+          end
           opts.on("--exclude REGEXP", "Drop Excel rows matching REGEXP in any column") do |value|
             pattern = unquote(value)
             options[:exclude] = pattern.empty? ? nil : pattern
@@ -107,14 +110,18 @@ module PortfolioPerformanceApi
           end
         end
         rest = parser.parse(Array(argv).map(&:to_s)).map { |value| unquote(value) }
-        raise ArgumentError, parser.banner if rest.size < 2
         raise ArgumentError, "--skip-lines must be >= 0" if options[:skip_lines].negative?
 
-        xls = rest.pop
-        account = rest.join(" ")
-        raise ArgumentError, parser.banner if account.empty? || xls.empty?
+        xls = options[:xls]
+        if xls.to_s.empty?
+          raise ArgumentError, parser.banner if rest.size < 2
 
-        options.merge(account: account, xls: File.expand_path(xls))
+          xls = File.expand_path(rest.pop)
+        end
+        account = rest.join(" ")
+        raise ArgumentError, parser.banner if account.empty? || xls.to_s.empty?
+
+        options.merge(account: account, xls: xls)
       end
 
       def self.discard_backup(path)

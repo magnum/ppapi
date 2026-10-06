@@ -153,6 +153,42 @@ class ImportTest < Minitest::Test
     assert_includes error.message, "bin/import fineco"
   end
 
+  def test_fineco_parse_argv_file_flag
+    options = PortfolioPerformanceApi::Import::Fineco.parse_argv(
+      ["EUR010069756", "--file", "./movements.xlsx", "--exclude", "MULTIFUNZIONE CONTACTLESS"]
+    )
+
+    assert_equal "EUR010069756", options[:account]
+    assert_equal File.expand_path("./movements.xlsx"), options[:xls]
+    assert_equal "MULTIFUNZIONE CONTACTLESS", options[:exclude]
+  end
+
+  def test_fineco_parse_argv_file_flag_before_account
+    options = PortfolioPerformanceApi::Import::Fineco.parse_argv(
+      ["--xls", "import/test_usd.xlsx", "USD010069756", "--skip-lines=7"]
+    )
+
+    assert_equal "USD010069756", options[:account]
+    assert_equal File.expand_path("import/test_usd.xlsx"), options[:xls]
+    assert_equal 7, options[:skip_lines]
+  end
+
+  def test_fineco_parse_argv_file_flag_with_account_spaces
+    options = PortfolioPerformanceApi::Import::Fineco.parse_argv(
+      ["EUR010069756", "test", "--file", "./movements.xlsx"]
+    )
+
+    assert_equal "EUR010069756 test", options[:account]
+    assert_equal File.expand_path("./movements.xlsx"), options[:xls]
+  end
+
+  def test_fineco_parse_argv_file_flag_requires_account
+    error = assert_raises(ArgumentError) do
+      PortfolioPerformanceApi::Import::Fineco.parse_argv(["--file", "./movements.xlsx"])
+    end
+    assert_includes error.message, "bin/import fineco"
+  end
+
   def test_fineco_format_row_uses_us_decimal
     row = PortfolioPerformanceApi::FinecoXls::Row.new(
       date: Date.new(2026, 8, 15),

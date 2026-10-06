@@ -1,0 +1,33 @@
+#compdef -p '*/bin/import'
+
+_ppapi-import() {
+  _arguments -C -s -S \
+    '(--file --xls)'{--file,--xls}'[Fineco .xls / .xlsx export]:excel file:_ppapi_import_excel' \
+    '--exclude[Drop Excel rows matching REGEXP]:regexp:' \
+    '--skip-lines[Preamble rows to skip]:lines:' \
+    '--match-security[Set security from capture or /REGEXP/VALUE]:spec:' \
+    '--match-offset-account[Set offset account from capture or /REGEXP/VALUE]:spec:' \
+    '1:provider:(fineco)' \
+    '*:account or excel file:_ppapi_import_positional'
+}
+
+_ppapi_import_excel() {
+  # `$HOME/...` is a parameter, not a path: expand it so Tab can list files.
+  if [[ $PREFIX == '$HOME'* ]]; then
+    PREFIX="${PREFIX/\$HOME/$HOME}"
+  fi
+  _files -g '*.(xls|xlsx|XLS|XLSX)'
+}
+
+_ppapi_import_positional() {
+  if (( ${words[(I)--file]} || ${words[(I)--xls]} || ${words[(I)--file=*} || ${words[(I)--xls=*} )); then
+    return 1
+  fi
+  # words: command, provider, account, file. Complete Excel after the account,
+  # or as soon as the prefix looks like a path.
+  if (( CURRENT >= 4 )) || [[ $PREFIX == [/~.$]* || $PREFIX == *'/'* ]]; then
+    _ppapi_import_excel
+    return
+  fi
+  return 1
+}
